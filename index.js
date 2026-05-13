@@ -59,6 +59,11 @@ async function handleEvent(event) {
 
 // ── Parse with Claude ────────────────────────────────────────────────────────
 async function parseExpense(msg) {
+  // Simple regex fallback first — handles "coffee 85", "85 coffee", "taxi 120 baht"
+  const simple = parseSimple(msg);
+  if (simple) return simple;
+
+  // Try Claude for more complex messages
   try {
     const res = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -80,6 +85,33 @@ Message: "${msg}"`,
   } catch {
     return null;
   }
+}
+
+function parseSimple(msg) {
+  const clean = msg.replace(/baht|บาท|฿/gi, "").trim();
+  // Match "word 123" or "123 word"
+  const m = clean.match(/^([a-zA-Zก-๙\s]+)\s+(\d+(?:\.\d+)?)$/) ||
+            clean.match(/^(\d+(?:\.\d+)?)\s+([a-zA-Zก-๙\s]+)$/);
+  if (!m) return null;
+
+  const isFirstNum = /^\d/.test(clean);
+  const amount = parseFloat(isFirstNum ? m[1] : m[2]);
+  const desc = (isFirstNum ? m[2] : m[1]).trim();
+  if (!amount || amount <= 0 || !desc) return null;
+
+  return { amount, description: desc, category: guessCategory(desc) };
+}
+
+function guessCategory(desc) {
+  const d = desc.toLowerCase();
+  if (/coffee|cafe|food|lunch|dinner|breakfast|eat|rice|noodle|beer|drink|ข้าว|อาหาร|กาแฟ|ชา/.test(d)) return "Food";
+  if (/taxi|grab|bus|bts|mrt|uber|fuel|gas|car|transport/.test(d)) return "Transport";
+  if (/shop|mall|clothes|shirt|shoes|buy/.test(d)) return "Shopping";
+  if (/electric|water|internet|phone|bill|rent/.test(d)) return "Bills";
+  if (/movie|netflix|game|concert|entertainment/.test(d)) return "Entertainment";
+  if (/doctor|hospital|medicine|health|pharmacy/.test(d)) return "Health";
+  if (/hotel|flight|travel|trip/.test(d)) return "Travel";
+  return "Other";
 }
 
 // ── Save to Sheet ────────────────────────────────────────────────────────────
